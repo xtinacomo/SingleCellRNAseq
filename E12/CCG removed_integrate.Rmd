@@ -1,0 +1,113 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(cowplot)
+library(dplyr)
+library(cowplot)
+
+```
+
+```{r}
+#Integrate E12.5 and E14 data 
+E12.5_locCCG_integrate <- subset(E12.5_logCCG_subset)
+E14d_integrate <- subset(E14_logCCG_subset2)
+```
+
+
+```{r}
+Idents(E12.5_locCCG_integrate) <- "Cluster"
+Idents(E14d_integrate) <- "Cluster"
+
+E12.5_locCCG_integrate@meta.data$Cluster <- paste("E12.5", E12.5_locCCG_integrate@meta.data$Cluster, sep = "_")
+E14d_integrate@meta.data$Cluster <- paste("E14", E14d_integrate@meta.data$Cluster, sep = "_")
+```
+
+```{r}
+#Normalize
+norm.fibroblastsE12.5 <- NormalizeData(E12.5_locCCG_integrate)
+norm.fibroblastsE14 <- NormalizeData(E14d_integrate)
+```
+
+```{r}
+#Find variable features
+E12.5fibro <-  FindVariableFeatures(norm.fibroblastsE12.5, selection.method = "vst",
+                                   nfeatures = 2000, verbose = FALSE)
+E14fibro <-  FindVariableFeatures(norm.fibroblastsE14, selection.method = "vst",
+                                  nfeatures = 2000, verbose = FALSE)
+```
+
+```{r}
+#Find Anchors
+reference_list <- c(E12.5fibro, E14fibro)
+fibroblast_anchors <- FindIntegrationAnchors(object.list = reference_list, dims = 1:30)
+
+```
+
+
+```{r}
+#Integrate
+fibroblast_integrated <- IntegrateData(anchorset = fibroblast_anchors, dims = 1:30)
+DefaultAssay(fibroblast_integrated) <- "integrated"
+```
+
+
+```{r}
+#Scale integrated seurat object
+fibroblast_integrated <- ScaleData(fibroblast_integrated, verbose = FALSE)
+
+#Run PCA
+fibroblast_integrated <- RunPCA(fibroblast_integrated, npcs = 30, verbose = FALSE)
+
+fibroblast_integrated <- RunUMAP(fibroblast_integrated, reduction = "pca", dims = 1:30)
+DimPlot(fibroblast_integrated, reduction = "umap", group.by = "seurat_clusters")
+DimPlot(fibroblast_integrated, reduction = "umap", pt.size = 0.1, split.by = "orig.ident", ncol = 2)
+DimPlot(fibroblast_integrated, reduction = "umap", group.by = "Cluster")
+```
+
+```{r}
+#Find neighbors
+Idents(fibroblast_integrated) <- "Sample"
+fibroblast_integrated <- FindNeighbors(fibroblast_integrated, dims = 1:15)
+fibroblast_integrated <- FindClusters(fibroblast_integrated, resolution = .6)
+DimPlot(fibroblast_integrated, reduction = "umap", group.by = "seurat_clusters")
+DimPlot(fibroblast_integrated, reduction = "umap", pt.size = 0.1, split.by = "orig.ident", ncol = 2)
+DimPlot(fibroblast_integrated, reduction = "umap", group.by = "Cluster")
+```
+```{r}
+for (gene in pia_markers) {
+  plot <- FeaturePlot(fibroblast_integrated, features = gene)
+  print(plot)
+}
+```
+```{r}
+for (gene in arachnoid_markers) {
+  plot <- FeaturePlot(fibroblast_integrated, features = gene)
+  print(plot)
+}
+```
+
+```{r}
+for (gene in dura_markers) {
+  plot <- FeaturePlot(fibroblast_integrated, features = gene)
+  print(plot)
+}
+```
+
+```{r}
+#cluster 2 is dura 
+#cluster 3 is arachnoid
+#clusters 5,4,0,1 are pia 
+```
+
+```{r}
+saveRDS(fibroblast_integrated, file = "LogNorm.scaled.RDS")
+```
