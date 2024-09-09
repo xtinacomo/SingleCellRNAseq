@@ -1,0 +1,284 @@
+---
+title: "Investigating Quiescent OPCs, Como 06.24.24"
+author: "Christina Como"
+output:
+  html_notebook:
+    toc: TRUE
+    toc_depth: 3
+    toc_float: TRUE
+    theme: united
+    highlight: tango
+editor_options: 
+  chunk_output_type: inline
+---
+# 1 Load data and necessary packages
+Follow this pipeline to download data https://cole-trapnell-lab.github.io/monocle3/docs/clustering/
+# 1.1 load libraries
+
+```{r}
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install(c('BiocGenerics', 'DelayedArray', 'DelayedMatrixStats',
+                       #'limma', 'lme4', 'S4Vectors', 'SingleCellExperiment',
+                       #'SummarizedExperiment', 'batchelor', 'HDF5Array',
+                       #'terra', 'ggrastr'))
+#install.packages("devtools")
+#devtools::install_github('cole-trapnell-lab/monocle3')
+#remotes::install_github("satijalab/seurat", "seurat5", quiet = TRUE)
+```
+
+```{r}
+#library(monocle3)
+#library(Seurat)
+```
+
+#1.2 read in RDS file, directly downloaded from GEO website 
+```{r}
+getwd()
+opcs <- readRDS('/Users/christinacomo/Downloads/GSE249268_Final_aging_OPC_cds_mm106.rds')
+```
+
+# 1.3 Change monocle dataframes to match with format of Seurat objects 
+
+```{r}
+counts <- assay(opcs)
+counts[1:5]
+genes <- make.names(rowData(opcs)$gene_short_name, unique = TRUE)
+```
+
+```{r}
+head(genes)
+```
+
+
+```{r}
+#grep, values=T - to look for replicate genes downstream
+names(genes) <- rownames(rowData(opcs))
+head(genes)
+```
+
+```{r}
+rownames(counts) <-genes[rownames(counts)]
+counts[1:5,1:10]
+dim(counts)
+```
+
+```{r}
+counts[is.na(rownames(counts)), 1:10]
+```
+
+```{r}
+counts[rownames(counts) == "", 1:10]
+```
+
+```{r}
+meta.df <- as.data.frame(colData(opcs))
+```
+
+# 1.4 Create Seurat object 
+```{r}
+opcs.so <- CreateSeuratObject(counts = counts, assay = "RNA", meta.data = meta.df)
+```
+
+# 2 Quality Control
+# 2.1 Mitochondria, Features, and Counts 
+Assign mitochondrial percentage to data set and look at quality control metrics (number of RNA molecules per cell, number of genes per cell and mitochondrial percent)
+```{r}
+opcs.so[["percent.mt"]] <- PercentageFeatureSet(opcs.so, pattern = "^MT-")
+VlnPlot(opcs.so, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+# 3 Process data
+# 3.1 Follow the Seurat vignette to analyze data, https://satijalab.org/seurat/articles/pbmc3k_tutorial#run-non-linear-dimensional-reduction-umaptsne
+```{r}
+# Because this is mostly a homogenous population, we are only going to use a variable feature count of 2,000
+opcs.so <- NormalizeData(opcs.so)
+opcs.so <- FindVariableFeatures(opcs.so, selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(opcs.so)
+opcs.so <- ScaleData(opcs.so, features = all.genes)
+opcs.so <- RunPCA(opcs.so, features = VariableFeatures(object = opcs.so))
+```
+
+```{r}
+ElbowPlot(opcs.so)
+```
+
+
+```{r}
+opcs.so <- FindNeighbors(opcs.so, dims = 1:10)
+opcs.so <- FindClusters(opcs.so, resolution = 0.3)
+```
+
+```{r}
+opcs.so <- RunUMAP(opcs.so, dims = 1:10)
+DimPlot(opcs.so)
+```
+
+# 3.2 Save RDS files for local loading
+```{r}
+saveRDS(opcs.so, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/RDSfiles/opcs.so.allages.rds')
+
+opcs.so <- readRDS('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/RDSfiles/opcs.so.allages.rds')
+```
+
+# 3.3 change identities of seurat object by accessing the metadata to look at how the data is represented
+```{r}
+Idents(opcs.so) <- 'final_identity'
+DimPlot(opcs.so)
+```
+
+```{r}
+Idents(opcs.so) <- 'new_age'
+DimPlot(opcs.so)
+```
+
+# 4 Subset data to only include the ages P180 and 360
+```{r}
+opcs.so.sub <- subset(opcs.so, idents = c('2_P180', '3_P360'))
+```
+
+```{r}
+opcs.so.sub <- RunPCA(opcs.so.sub)
+opcs.so.sub <- FindNeighbors(opcs.so.sub, dims = 1:10)
+opcs.so.sub <- FindClusters(opcs.so.sub, resolution = 0.3)
+opcs.so.sub <- RunUMAP(opcs.so.sub, dims = 1:10)
+DimPlot(opcs.so.sub)
+```
+
+```{r}
+saveRDS(opcs.so.sub, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/RDSfiles/opcs.so.ages.rds')
+```
+
+```{r}
+opcs.so.sub <- readRDS('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/RDSfiles/opcs.so.ages.rds')
+```
+
+# 4.1 Look at identities of subsetted clusters 
+```{r}
+Idents(opcs.so.sub) <- 'seurat_clusters'
+DimPlot(opcs.so.sub)
+```
+
+```{r}
+Idents(opcs.so.sub) <- 'age'
+DimPlot(opcs.so.sub)
+```
+This is the final_identity/labels that was created by the authors of the paper 
+```{r}
+library(Seurat)
+Idents(opcs.so.sub) <- 'final_identity'
+DimPlot(opcs.so.sub)
+```
+# 5 Subset data to only look at quiescent OPCs
+```{r}
+opcs.so.qui <- subset(opcs.so.sub, ident='quiescent_OPC')
+```
+
+# 5.1 Run standard workflow
+You do not have to rescale or normalize your data after subsetting but you must re-run PCA as you are chaning the UMAP space
+At the 0.1 resolution, we get 4 clusters -- this looks good to me and does not appear to be over or under clustered. For reference I ran a few different resolutions, but I like 0.1 the best. It makes sense that it is a low number, as it is a fairly homogeneous population. making it any higher can create false positives or identification of clusters that are not real. However, whatever you think is best in terms of the biology and your expertise is good with me, a case could be made for resolution 0.2. 
+
+```{r}
+opcs.so.qui <- RunPCA(opcs.so.qui)
+opcs.so.qui <- FindNeighbors(opcs.so.qui, dims = 1:10)
+opcs.so.qui <- FindClusters(opcs.so.qui, resolution = 0.1)
+opcs.so.qui <- RunUMAP(opcs.so.qui, dims = 1:10)
+DimPlot(opcs.so.qui)
+```
+```{r}
+opcs.so.qui.res0.2 <- FindClusters(opcs.so.qui, resolution = 0.2)
+opcs.so.qui.res0.2 <- RunUMAP(opcs.so.qui.res0.2, dims = 1:10)
+DimPlot(opcs.so.qui.res0.2)
+```
+# 6 Find markers from clusters 
+```{r}
+marks.0 <- FindMarkers(opcs.so.qui, ident.1 = '0')
+marks.1 <- FindMarkers(opcs.so.qui, ident.1 = "1")
+marks.2 <- FindMarkers(opcs.so.qui, ident.1 = '2')
+```
+
+# 6.1 You can see that the tables made with the gene markers are missing a column header above the ensembl ID and are not the gene names we want
+```{r}
+head(marks.0)
+```
+#6.2 Write gene tables as a csv and edit in excel (easier than doing it here)
+```{r}
+write.csv(marks.0, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers0.csv')
+write.csv(marks.1, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers1.csv')
+write.csv(marks.2, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers2.csv')
+```
+
+# 6.3 Read back in csv files with updated column headers
+```{r}
+marks.0 <- read.csv('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers0.csv')
+marks.1 <- read.csv('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers1.csv')
+marks.2 <- read.csv('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers2.csv')
+```
+
+```{r}
+head(marks.0)
+```
+# 7 Change ensebml IDs to gene IDs
+We can see that the ensembl IDs have the transcript information after it and we need to remove it to be able to convert to gene IDs
+#7.1 Write a function to remove transcript infomration for our dataframe
+```{r}
+rm <- function(x) {
+  sub("\\..*", "", x)
+}
+```
+
+```{r}
+marks.0$ENSEMBL <- sapply(marks.0$ENSEMB, rm)
+marks.1$ENSEMBL <- sapply(marks.1$ENSEMB, rm)
+marks.2$ENSEMBL <- sapply(marks.2$ENSEMB, rm)
+```
+
+```{r}
+head(marks.0)
+```
+
+```{r}
+write.csv(marks.0, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers0.csv')
+write.csv(marks.1, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers1.csv')
+write.csv(marks.2, '/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers2.csv')
+```
+
+
+# 7.2 Convert gene IDs
+I used this https://www.biotools.fr/mouse/ensembl_symbol_converter you can use tools like Biomart, but this is faster and easier
+
+```{r}
+marks.0 <- read.csv('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers0.csv')
+marks.1 <- read.csv('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers1.csv')
+marks.2 <- read.csv('/Users/christinacomo/Library/CloudStorage/OneDrive-TheUniversityofColoradoDenver/10xVisium/Ethan Hughes/outputs/markers2.csv')
+```
+
+# 7.3 Interactive table of top genes based on increased expression, refer to excel sheets for all
+```{r}
+head(marks.0)
+```
+```{r}
+head(marks.1)
+```
+
+
+```{r}
+head(marks.2)
+```
+# 8 Session Info
+```{r}
+sessionInfo()
+```
+
+```{r}
+# Exclusive list for 0,1,2
+# Number of reads with fold change 
+library(Seurat)
+DimPlot(opcs.so.qui)
+DotPlot(opcs.so.qui, features = c("Lars2"))
+```
+
+```{r}
+head(opcs.so.qui$)
+FeaturePlot(opcs.so.qui, features = "ENSMUSG00000052229.6")
+```
+
